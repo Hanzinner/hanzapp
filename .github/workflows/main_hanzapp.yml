@@ -66,4 +66,4 @@ jobs:
         with:
           app-name: 'hanzapp'
           slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_CC496E75388E4404BF07772BB75F1642 }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_AC98E347555F4F2388285A4C592831FB }}
