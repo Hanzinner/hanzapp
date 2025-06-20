@@ -1,6 +1,9 @@
 import os
 from flask import Flask, render_template_string, request, redirect, url_for
-import pyodbc
+
+# Змінено: pyodbc видалено, додано mysql.connector
+import mysql.connector
+from mysql.connector import Error
 
 app = Flask(__name__)
 
@@ -13,8 +16,35 @@ if not DB_CONNECTION_STRING:
         return "<h1>Помилка: DB_CONNECTION_STRING не встановлено. Перевірте конфігурацію App Service.</h1>"
 else:
     def get_db_connection():
-        conn = pyodbc.connect(DB_CONNECTION_STRING)
-        return conn
+        """
+        Парсить рядок DB_CONNECTION_STRING і повертає об'єкт підключення до MySQL.
+        Очікує формат: "host=...;port=...;user=...;password=...;database=...;ssl_disabled=..."
+        """
+        params = {}
+        try:
+            # Розпарсити рядок підключення.
+            # Наприклад: "host=your_host;port=3306;user=your_user;password=your_password;database=your_db"
+            for part in DB_CONNECTION_STRING.split(';'):
+                if '=' in part:
+                    key, value = part.split('=', 1)
+                    params[key.strip().lower()] = value.strip()
+
+            # Створити підключення до MySQL
+            conn = mysql.connector.connect(
+                host=params.get('host'),
+                port=int(params.get('port', 3306)),
+                user=params.get('user'),
+                password=params.get('password'),
+                database=params.get('database'),
+                # Додано налаштування SSL з урахуванням ssl_disabled
+                ssl_disabled=params.get('ssl_disabled', 'False').lower() == 'true'
+                # Якщо потрібен SSL CA сертифікат, його потрібно завантажити
+                # на App Service і вказати шлях: ssl_ca=params.get('ssl_ca')
+            )
+            return conn
+        except Error as e:
+            print(f"Помилка підключення до MySQL: {e}")
+            raise # Перекидаємо виняток далі
 
     HTML_TEMPLATE = """
     <!DOCTYPE html>
@@ -67,21 +97,20 @@ else:
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
+            # Змінено: Створення таблиці для MySQL (UNSIGNED INT, AUTO_INCREMENT)
             cursor.execute("""
-                IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Todos' and xtype='U')
-                CREATE TABLE Todos (
-                    Id INT IDENTITY(1,1) PRIMARY KEY,
-                    Description NVARCHAR(255) NOT NULL
+                CREATE TABLE IF NOT EXISTS Todos (
+                    Id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    Description VARCHAR(255) NOT NULL
                 )
             """)
             conn.commit()
 
             cursor.execute("SELECT Id, Description FROM Todos ORDER BY Id DESC")
             todos = cursor.fetchall()
-        except pyodbc.Error as ex:
-            sqlstate = ex.args[0]
-            print(f"Database error: {sqlstate}")
-            return f"Database error: {sqlstate}. Is DB_CONNECTION_STRING correct and DB accessible from App Service? Check App Service logs.", 500
+        except Error as ex: # Змінено тип винятку на mysql.connector.Error
+            print(f"Database error: {ex}")
+            return f"Database error: {ex}. Is DB_CONNECTION_STRING correct and DB accessible from App Service? Check App Service logs.", 500
         finally:
             if cursor:
                 cursor.close()
@@ -97,12 +126,12 @@ else:
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("INSERT INTO Todos (Description) VALUES (?)", item)
+            # Змінено: Використання %s для плейсхолдерів в MySQL
+            cursor.execute("INSERT INTO Todos (Description) VALUES (%s)", (item,))
             conn.commit()
-        except pyodbc.Error as ex:
-            sqlstate = ex.args[0]
-            print(f"Database error: {sqlstate}")
-            return f"Database error: {sqlstate}. Could not add item.", 500
+        except Error as ex: # Змінено тип винятку
+            print(f"Database error: {ex}")
+            return f"Database error: {ex}. Could not add item.", 500
         finally:
             if cursor:
                 cursor.close()
@@ -117,15 +146,18 @@ else:
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM Todos WHERE Id = ?", item_id)
+            # Змінено: Використання %s для плейсхолдерів в MySQL
+            cursor.execute("DELETE FROM Todos WHERE Id = %s", (item_id,))
             conn.commit()
-        except pyodbc.Error as ex:
-            sqlstate = ex.args[0]
-            print(f"Database error: {sqlstate}")
-            return f"Database error: {sqlstate}. Could not delete item.", 500
+        except Error as ex: # Змінено тип винятку
+            print(f"Database error: {ex}")
+            return f"Database error: {ex}. Could not delete item.", 500
         finally:
             if cursor:
                 cursor.close()
             if conn:
                 conn.close()
         return redirect(url_for('index'))
+
+if __name__ == '__main__':
+    app.run(debug=True)
